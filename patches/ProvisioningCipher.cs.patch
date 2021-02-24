@@ -1,0 +1,82 @@
+diff --git a/libsignal-service-dotnet/crypto/ProvisioningCipher.cs b/libsignal-service-dotnet/crypto/ProvisioningCipher.cs
+index a601c98..e6e78ea 100644
+--- a/libsignal-service-dotnet/crypto/ProvisioningCipher.cs
++++ b/libsignal-service-dotnet/crypto/ProvisioningCipher.cs
+@@ -4,12 +4,12 @@ using libsignal.ecc;
+ using libsignal.kdf;
+ using libsignalservice.push;
+ using libsignalservice.util;
+-
+ using System;
+ using System.IO;
+ using System.Linq;
+ using System.Security.Cryptography;
+ using System.Text;
++using libsignal.util;
+ 
+ namespace libsignalservice.crypto
+ {
+@@ -34,6 +34,7 @@ namespace libsignalservice.crypto
+             {
+                 throw new Exception("Bad version number on provision message!");
+             }
++
+             byte[] iv = new byte[16];
+             Array.Copy(joined, 1, iv, 0, 16);
+             byte[] ciphertext = new byte[joined.Length - 32 - 17];
+@@ -75,10 +76,16 @@ namespace libsignalservice.crypto
+             }
+         }
+ 
++        public static void debug(string title, byte[] data)
++        {
++            Console.WriteLine(title + ": " + BitConverter.ToString(data));
++        }
++
+         public byte[] encrypt(ProvisionMessage message) // throws InvalidKeyException
+         {
+             ECKeyPair ourKeyPair = Curve.generateKeyPair();
+             byte[] sharedSecret = Curve.calculateAgreement(theirPublicKey, ourKeyPair.getPrivateKey());
++
+             byte[] derivedSecret = new HKDFv3().deriveSecrets(sharedSecret, Encoding.UTF8.GetBytes("TextSecure Provisioning Message"), 64);
+             byte[][] parts = Util.Split(derivedSecret, 32, 32);
+ 
+@@ -87,11 +94,15 @@ namespace libsignalservice.crypto
+             byte[] mac = getMac(parts[1], Util.Join(version, ciphertext));
+             byte[] body = Util.Join(version, ciphertext, mac);
+ 
+-            return new ProvisionEnvelope
+-            {
+-                PublicKey = ByteString.CopyFrom(ourKeyPair.getPublicKey().serialize()),
+-                Body = ByteString.CopyFrom(body)
+-            }.ToByteArray();
++            debug("sharedsecret", sharedSecret);
++            debug("derivedSecret", derivedSecret);
++            debug("parts0", parts[0]);
++            debug("parts1", parts[1]);
++            debug("ciphertext", ciphertext);
++            debug("mac", mac);
++            debug("body", body);
++
++            return new ProvisionEnvelope { PublicKey = ByteString.CopyFrom(ourKeyPair.getPublicKey().serialize()), Body = ByteString.CopyFrom(body) }.ToByteArray();
+         }
+ 
+         private byte[] getCiphertext(byte[] key, byte[] message)
+@@ -99,12 +110,15 @@ namespace libsignalservice.crypto
+             try
+             {
+                 using(var aes = Aes.Create())
+-                using (var enc = aes.CreateEncryptor())
+                 {
++                    aes.Mode = CipherMode.CBC;
+                     aes.BlockSize = 128;
+                     aes.Padding = PaddingMode.PKCS7;
+                     aes.Key = key;
+-                    return Util.Join(aes.IV, enc.TransformFinalBlock(message, 0, message.Length));
++                    var iv = aes.IV;
++                    
++                    using(var enc = aes.CreateEncryptor())
++                        return Util.Join(iv, enc.TransformFinalBlock(message, 0, message.Length));
+                 }
+             }
+             catch( /*NoSuchAlgorithmException | NoSuchPaddingException | java.security.InvalidKeyException | IllegalBlockSizeException | BadPaddingException*/ Exception e)
